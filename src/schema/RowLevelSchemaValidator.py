@@ -38,9 +38,7 @@ class ColumnDefinition:
         self.is_nullable = is_nullable
 
     def is_valid(self, series: pd.Series) -> pd.Series:
-        if self.is_nullable:
-            return pd.Series(True, index=series.index)
-        return series.notnull()
+        return pd.Series(True, index=series.index) if self.is_nullable else series.notnull()
 
     def cast_series(self, series: pd.Series) -> pd.Series:
         return series
@@ -62,20 +60,20 @@ class StringColumnDefinition(ColumnDefinition):
 
     def is_valid(self, series: pd.Series) -> pd.Series:
         s = series.astype(object)
-        mask = pd.Series(True, index=s.index)
+        # Always enforce type (string or null)
+        mask = s.isnull() | s.apply(lambda x: isinstance(x, str))
 
         if not self.is_nullable:
+            # enforce non-null
             mask &= s.notnull()
-
-        mask &= (s.isnull() | s.apply(lambda x: isinstance(x, str)))
-
-        if self.min_length is not None:
-            mask &= (s.isnull() | s.str.len().ge(self.min_length))
-        if self.max_length is not None:
-            mask &= (s.isnull() | s.str.len().le(self.max_length))
-
-        if self.matches is not None:
-            mask &= (s.isnull() | s.str.match(self.matches))
+            # enforce length constraints
+            if self.min_length is not None:
+                mask &= s.str.len().ge(self.min_length)
+            if self.max_length is not None:
+                mask &= s.str.len().le(self.max_length)
+            # enforce regex
+            if self.matches is not None:
+                mask &= s.str.match(self.matches)
 
         return mask
 
@@ -158,7 +156,7 @@ class TimestampColumnDefinition(ColumnDefinition):
     def is_valid(self, series: pd.Series) -> pd.Series:
         coerced = pd.to_datetime(series, format=self.mask, errors="coerce")
         if self.is_nullable:
-            return pd.Series(True, index=series.index) & (series.isnull() | coerced.notnull())
+            return series.isnull() | coerced.notnull()
         return coerced.notnull()
 
     def cast_series(self, series: pd.Series) -> pd.Series:
@@ -258,7 +256,6 @@ class RowLevelSchemaValidator:
                 casted[col] = valid[col]
 
         valid_casted_df = pd.DataFrame(casted, index=valid.index)
-
         return RowLevelSchemaValidationResult(
             valid_rows=valid_casted_df,
             num_valid_rows=valid_casted_df.shape[0],
