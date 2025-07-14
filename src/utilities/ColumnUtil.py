@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# PyDeequPlus — 100% Python port of Amazon Deequ
+# PyDeequ — 100% Python port of Amazon Deequ
 # Author: AMIR HOSSEIN ALIKHAH MISHAMANDANI
 # Email: amirhosseinalikhahm@gatech.edu
 # Created: 2025-07-14

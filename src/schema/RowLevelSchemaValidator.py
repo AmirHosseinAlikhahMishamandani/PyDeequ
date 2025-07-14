@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# PyDeequPlus — 100% Python port of Amazon Deequ
+# PyDeequ — 100% Python port of Amazon Deequ
 # Author: AMIR HOSSEIN ALIKHAH MISHAMANDANI
 # Email: amirhosseinalikhahm@gatech.edu
 # Created: 2025-07-14
@@ -23,10 +23,9 @@
 # See the LICENSE file in the project root for the full MIT terms.
 # -----------------------------------------------------------------------------
 
-
 import pandas as pd
 from decimal import Decimal, InvalidOperation
-from typing import Optional, Sequence
+from typing import Optional, Tuple
 from dataclasses import dataclass
 
 
@@ -38,14 +37,11 @@ class ColumnDefinition:
         self.is_nullable = is_nullable
 
     def is_valid(self, series: pd.Series) -> pd.Series:
-        # Only nullability by default
         if self.is_nullable:
             return pd.Series(True, index=series.index)
-        else:
-            return series.notnull()
+        return series.notnull()
 
     def cast_series(self, series: pd.Series) -> pd.Series:
-        # No‐op by default
         return series
 
 
@@ -67,20 +63,16 @@ class StringColumnDefinition(ColumnDefinition):
         s = series.astype(object)
         mask = pd.Series(True, index=s.index)
 
-        # nullability
         if not self.is_nullable:
             mask &= s.notnull()
 
-        # type: allow only strings or null
         mask &= (s.isnull() | s.apply(lambda x: isinstance(x, str)))
 
-        # length constraints
         if self.min_length is not None:
             mask &= (s.isnull() | s.str.len().ge(self.min_length))
         if self.max_length is not None:
             mask &= (s.isnull() | s.str.len().le(self.max_length))
 
-        # regex match
         if self.matches is not None:
             mask &= (s.isnull() | s.str.match(self.matches))
 
@@ -100,17 +92,14 @@ class IntColumnDefinition(ColumnDefinition):
         self.max_value = max_value
 
     def is_valid(self, series: pd.Series) -> pd.Series:
-        # try converting to integer
         coerced = pd.to_numeric(series, errors="coerce").astype("Int64")
         mask = pd.Series(True, index=series.index)
 
-        # nullability + parse success
         if self.is_nullable:
             mask &= (series.isnull() | coerced.notnull())
         else:
             mask &= coerced.notnull()
 
-        # min/max
         if self.min_value is not None:
             mask &= (series.isnull() | coerced.ge(self.min_value))
         if self.max_value is not None:
@@ -143,10 +132,8 @@ class DecimalColumnDefinition(ColumnDefinition):
             except InvalidOperation:
                 return False
             digits = d.as_tuple().digits
-            # total digits
             if len(digits) > self.precision:
                 return False
-            # scale = digits after decimal
             if -d.as_tuple().exponent > self.scale:
                 return False
             return True
@@ -171,8 +158,7 @@ class TimestampColumnDefinition(ColumnDefinition):
         coerced = pd.to_datetime(series, format=self.mask, errors="coerce")
         if self.is_nullable:
             return pd.Series(True, index=series.index) & (series.isnull() | coerced.notnull())
-        else:
-            return coerced.notnull()
+        return coerced.notnull()
 
     def cast_series(self, series: pd.Series) -> pd.Series:
         return pd.to_datetime(series, format=self.mask, errors="coerce")
@@ -180,7 +166,7 @@ class TimestampColumnDefinition(ColumnDefinition):
 
 @dataclass(frozen=True)
 class RowLevelSchema:
-    column_definitions: Sequence[ColumnDefinition] = ()
+    column_definitions: Tuple[ColumnDefinition, ...] = ()
 
     def with_string_column(
             self,
@@ -190,9 +176,11 @@ class RowLevelSchema:
             max_length: Optional[int] = None,
             matches: Optional[str] = None
     ) -> "RowLevelSchema":
-        return RowLevelSchema(self.column_definitions + (
-            StringColumnDefinition(name, is_nullable, min_length, max_length, matches),
-        ))
+        return RowLevelSchema(
+            self.column_definitions + (
+                StringColumnDefinition(name, is_nullable, min_length, max_length, matches),
+            )
+        )
 
     def with_int_column(
             self,
@@ -201,9 +189,11 @@ class RowLevelSchema:
             min_value: Optional[int] = None,
             max_value: Optional[int] = None
     ) -> "RowLevelSchema":
-        return RowLevelSchema(self.column_definitions + (
-            IntColumnDefinition(name, is_nullable, min_value, max_value),
-        ))
+        return RowLevelSchema(
+            self.column_definitions + (
+                IntColumnDefinition(name, is_nullable, min_value, max_value),
+            )
+        )
 
     def with_decimal_column(
             self,
@@ -212,9 +202,11 @@ class RowLevelSchema:
             scale: int,
             is_nullable: bool = True
     ) -> "RowLevelSchema":
-        return RowLevelSchema(self.column_definitions + (
-            DecimalColumnDefinition(name, precision, scale, is_nullable),
-        ))
+        return RowLevelSchema(
+            self.column_definitions + (
+                DecimalColumnDefinition(name, precision, scale, is_nullable),
+            )
+        )
 
     def with_timestamp_column(
             self,
@@ -222,9 +214,11 @@ class RowLevelSchema:
             mask: str,
             is_nullable: bool = True
     ) -> "RowLevelSchema":
-        return RowLevelSchema(self.column_definitions + (
-            TimestampColumnDefinition(name, mask, is_nullable),
-        ))
+        return RowLevelSchema(
+            self.column_definitions + (
+                TimestampColumnDefinition(name, mask, is_nullable),
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -244,23 +238,20 @@ class RowLevelSchemaValidator:
             schema: RowLevelSchema
     ) -> RowLevelSchemaValidationResult:
         df = data.copy()
-        # build CNF mask
         mask = pd.Series(True, index=df.index)
+
         for cd in schema.column_definitions:
-            series = df.get(cd.name, pd.Series([None]*len(df), index=df.index))
+            series = df.get(cd.name, pd.Series([None] * len(df), index=df.index))
             mask &= cd.is_valid(series)
 
-        # split valid/invalid
         valid = df[mask].copy()
         invalid = df[~mask].copy()
 
-        # cast valid rows
         casted = {}
         defined_names = [cd.name for cd in schema.column_definitions]
         for cd in schema.column_definitions:
             casted[cd.name] = cd.cast_series(valid[cd.name])
 
-        # include any other columns unchanged
         for col in valid.columns:
             if col not in defined_names:
                 casted[col] = valid[col]
