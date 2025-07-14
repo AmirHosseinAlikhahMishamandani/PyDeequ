@@ -32,13 +32,28 @@ class ColumnUtil:
         """Remove escape characters from column name if present."""
         if column.startswith("`") and column.endswith("`"):
             return column[1:-1]
-        else:
-            return column
+        return column
 
     @staticmethod
     def escape_column(column: str) -> str:
-        """Add escape characters to column name if it contains a dot."""
-        if "." in column:
-            return "`" + column + "`"
-        else:
+        """
+        Add escape characters if:
+          - already contains stray backticks (but isn’t fully wrapped), or
+          - contains more than one dot segment.
+        Otherwise leave it unchanged.
+        """
+        # 1) already properly escaped?
+        if column.startswith("`") and column.endswith("`"):
             return column
+
+        # 2) contains >1 dots? wrap
+        if column.count(".") > 1:
+            return f"`{column}`"
+
+        # 3) contains any stray backtick? strip and wrap
+        if "`" in column:
+            inner = column.strip("`")
+            return f"`{inner}`"
+
+        # 4) otherwise no change
+        return column
